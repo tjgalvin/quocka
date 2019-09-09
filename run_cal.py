@@ -9,6 +9,13 @@ def logprint(s2p,lf):
 	print >>lf, s2p
 	print s2p
 
+def flag(src, logf):
+	call(['pgflag','vis=%s'%src,'stokes=i,q,u,v','flagpar=8,5,0,3,6,3','command=<b','options=nodisp'],stdout=logf,stderr=logf)
+	call(['pgflag','vis=%s'%src,'stokes=i,v,u,q','flagpar=8,2,0,3,6,3','command=<b','options=nodisp'],stdout=logf,stderr=logf)
+	call(['pgflag','vis=%s'%src,'stokes=i,v,q,u','flagpar=8,2,0,3,6,3','command=<b','options=nodisp'],stdout=logf,stderr=logf)
+
+
+
 def main(args,cfg):
 	# Initiate log file with options used
 	logf = open(args.log_file,'w',1) # line buffered
@@ -18,6 +25,8 @@ def main(args,cfg):
 	logprint(cfg.items('output'),logf)
 	logprint(cfg.items('observation'),logf)
 	logprint('',logf)
+
+	NFBIN = 4
 
 	gwcp = cfg.get('input','dir')+'/'+cfg.get('input','date')+'*'
 	atfiles = sorted(glob.glob(gwcp))
@@ -44,6 +53,11 @@ def main(args,cfg):
 				logprint('Ignoring setup file %s'%sline[0],logf)
 				atfiles.remove(a)
 	uvlist = ','.join(atfiles)
+
+	logprint('uvlist is %s'%uvlist, logf)
+	logprint('outdir is %s'%outdir, logf)
+	logprint('if_use is %s'%if_use, logf)
+
 
 	if not os.path.exists(outdir+'/dat.uv') or rawclobber:
 		logprint('Running ATLOD...',logf)
@@ -122,76 +136,64 @@ def main(args,cfg):
 				continue
 			logprint('\nFLAGGING: %d / %d = %s'%(i+1,len(slist),source),logf)
 			####
-			# This part may be largely obsolete with options=rfiflag in ATLOD
+			# # This part may be largely obsolete with options=rfiflag in ATLOD
 			for line in open('../badchans_%s.txt'%frqid):
 				sline=line.split()
 				lc,uc=sline[0].split('-')
 				dc = int(uc)-int(lc)+1
+				print(lc, uc, dc)
 				call(['uvflag','vis=%s'%source,'line=chan,%d,%s'%(dc,lc),'flagval=flag'],stdout=logf,stderr=logf)
 			####
-			#call(['pgflag','vis=%s'%source,'stokes=xx,yy,yx,xy','flagpar=20,10,10,3,5,3,20','command=<be','options=nodisp'])
-			call(['uvflag','vis=%s'%source,'select=amplitude(2),polarization(xy,yx)','flagval=flag'],stdout=logf,stderr=logf)
-			call(['uvpflag','vis=%s'%source,'polt=xy,yx','pols=xx,xy,yx,yy','options=or'],stdout=logf,stderr=logf)
-			call(['pgflag','vis=%s'%source,'stokes=v','flagpar=7,4,12,3,5,3,20','command=<be','options=nodisp'],stdout=logf,stderr=logf)
+			flag(source, logf)
+			
 		logprint('Calibration of primary cal (%s) proceeding ...'%prical,logf)
-		call(['mfcal','vis=%s'%pricalname,'interval=10000','select=elevation(40,90)'],stdout=logf,stderr=logf)
-		call(['pgflag','vis=%s'%pricalname,'stokes=v','flagpar=7,4,12,3,5,3,20','command=<be','options=nodisp'],stdout=logf,stderr=logf)
-		call(['mfcal','vis=%s'%pricalname,'interval=10000','select=elevation(40,90)'],stdout=logf,stderr=logf)
-		call([ 'gpcal', 'vis=%s'%pricalname, 'interval=0.1', 'nfbin=16', 'options=xyvary','select=elevation(40,90)'],stdout=logf,stderr=logf)
-		call(['pgflag','vis=%s'%pricalname,'stokes=v','flagpar=7,4,12,3,5,3,20','command=<be','options=nodisp'],stdout=logf,stderr=logf)
-		call([ 'gpcal', 'vis=%s'%pricalname, 'interval=0.1', 'nfbin=16', 'options=xyvary','select=elevation(40,90)'],stdout=logf,stderr=logf)
+		# call(['mfcal','vis=%s'%pricalname,'interval=10000','select=elevation(40,90)'],stdout=logf,stderr=logf)
+		
+		# Flag out useless 1934 data
+		call(['uvflag','vis=%s'%pricalname, 'select=-elevation(40,90)', 'flagval=flag'],stdout=logf,stderr=logf)
+
+		# flag(pricalname, logf)
+		call(['mfcal','vis=%s'%pricalname,'interval=0.1,1,30'],stdout=logf,stderr=logf)
+		call([ 'gpcal', 'vis=%s'%pricalname, 'interval=0.1', 'nfbin=%d'%NFBIN, 'options=xyvary'],stdout=logf,stderr=logf)
+
+		flag(pricalname, logf)
+		call(['mfcal','vis=%s'%pricalname,'interval=0.1,1,30'],stdout=logf,stderr=logf)
+		call([ 'gpcal', 'vis=%s'%pricalname, 'interval=0.1', 'nfbin=%d'%NFBIN, 'options=xyvary'],stdout=logf,stderr=logf)
+		
 		for seccalname in seccalnames:
 			logprint('Transferring to compact-source secondary %s...'%seccalname,logf)
 			call(['gpcopy','vis=%s'%pricalname,'out=%s'%seccalname],stdout=logf,stderr=logf)
-			call(['puthd','in=%s/interval'%seccalname,'value=100000'],stdout=logf,stderr=logf)
-			call(['pgflag','vis=%s'%seccalname,'stokes=v','flagpar=7,4,12,3,5,3,20','command=<be','options=nodisp'],stdout=logf,stderr=logf)
-			##call(['gpcal','vis=%s'%seccalname,'interval=0.1','nfbin=16','options=xyvary,qusolve'],stdout=logf,stderr=logf)
-			call(['gpcal','vis=%s'%seccalname,'interval=0.1','nfbin=16','options=nopol,noxy'],stdout=logf,stderr=logf)
-			call(['gpedit','vis=%s'%seccalname,'options=phase'],stdout=logf,stderr=logf)
-			call(['pgflag','vis=%s'%seccalname,'stokes=v','flagpar=7,4,12,3,5,3,20','command=<be','options=nodisp'],stdout=logf,stderr=logf)
-			##call(['gpcal','vis=%s'%seccalname,'interval=0.1','nfbin=16','options=xyvary,qusolve'],stdout=logf,stderr=logf)
-			call(['gpcal','vis=%s'%seccalname,'interval=0.1','nfbin=16','options=nopol,noxy'],stdout=logf,stderr=logf)
-			call(['gpedit','vis=%s'%seccalname,'options=phase'],stdout=logf,stderr=logf)
+			flag(seccalname, logf)
+			
+			call(['gpcal','vis=%s'%seccalname,'interval=0.1','nfbin=%d'%NFBIN,'options=xyvary,qusolve'],stdout=logf,stderr=logf)
+			flag(seccalname, logf)
+			
+			call(['gpcal','vis=%s'%seccalname,'interval=0.1','nfbin=%d'%NFBIN,'options=xyvary,qusolve'],stdout=logf,stderr=logf)
 			call(['gpboot','vis=%s'%seccalname,'cal=%s'%pricalname],stdout=logf,stderr=logf)
-		#if len(seccalnames) == 2:
-		#	call(['gpcopy','vis=%s'%seccalnames[0],'out=%s'%seccalnames[1],'mode=merge'],stdout=logf,stderr=logf)
-		#	seccalname = seccalnames[1]
-		#elif len(seccalnames) == 1:
-		#	seccalname = seccalnames[0]
-		#else:
-		#	logprint('Error: too many secondaries, fix me!!',logf)
-		#	exit(1)
+
 		while len(seccalnames) > 1:
 			logprint('Merging gain table for %s into %s ...'%(seccalnames[-1],seccalnames[0]),logf)
 			call(['gpcopy','vis=%s'%seccalnames[-1],'out=%s'%seccalnames[0],'mode=merge'],stdout=logf,stderr=logf)
 			del seccalnames[-1]
+		
 		seccalname = seccalnames[0]
 		logprint('Using gains from %s ...'%(seccalname),logf)
-		if seccal_ext != 'NONE':
-			logprint('Transferring to extended-source secondary...',logf)
-			call(['gpcopy','vis=%s'%pricalname,'out=%s'%ext_seccalname],stdout=logf,stderr=logf)
-			call(['puthd','in=%s/interval'%ext_seccalname,'value=100000'],stdout=logf,stderr=logf)
-			call(['pgflag','vis=%s'%ext_seccalname,'stokes=v','flagpar=7,4,12,3,5,3,20','command=<be','options=nodisp'],stdout=logf,stderr=logf)
-			call(['gpcal','vis=%s'%ext_seccalname,'interval=0.1','nfbin=16','options=xyvary,qusolve'],stdout=logf,stderr=logf)
-			call(['pgflag','vis=%s'%ext_seccalname,'stokes=v','flagpar=7,4,12,3,5,3,20','command=<be','options=nodisp'],stdout=logf,stderr=logf)
-			call(['gpcal','vis=%s'%ext_seccalname,'interval=0.1','nfbin=16','options=xyvary,qusolve'],stdout=logf,stderr=logf)
-			call(['gpboot','vis=%s'%ext_seccalname,'cal=%s'%pricalname],stdout=logf,stderr=logf)
-			logprint('\n\n##########\nApplying calibration to extended sources...\n##########\n\n',logf)
-			for t in ext_targetnames:
-				logprint('Working on source %s'%t,logf)
-				call(['gpcopy','vis=%s'%ext_seccalname,'out=%s'%t],stdout=logf,stderr=logf)
-				call(['pgflag','vis=%s'%t,'stokes=v','flagpar=7,4,12,3,5,3,20','command=<be','options=nodisp'],stdout=logf,stderr=logf)
+		
 		logprint('\n\n##########\nApplying calibration to compact sources...\n##########\n\n',logf)
 		for t in targetnames:
 			logprint('Working on source %s'%t,logf)
 			slogname = '%s.log.txt'%t
 			slogf = open(slogname,'w',1)
+			
 			call(['gpcopy','vis=%s'%seccalname,'out=%s'%t],stdout=logf,stderr=logf)
-			call(['pgflag','vis=%s'%t,'stokes=v','flagpar=7,4,12,3,5,3,20','command=<be','options=nodisp'],stdout=logf,stderr=logf)
+			flag(t, logf)
+			
 			logprint('Writing source flag and pol info to %s'%slogname,logf)
 			call(['uvfstats','vis=%s'%t],stdout=slogf,stderr=slogf)
 			call(['uvfstats','vis=%s'%t,'mode=channel'],stdout=slogf,stderr=slogf)
 			slogf.close()
+
+
 	for t in sorted(unique(src_to_plot)):
 		logprint('Plotting RMSF for %s'%t,logf)
 		if int(bandfreq[0]) < 3500:
